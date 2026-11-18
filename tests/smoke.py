@@ -1,4 +1,6 @@
-"""Offline checks for inherited fixes; not a reproduction of a reported client crash.
+"""Offline checks for Thorny's inherited fixes and AscensionXI's own, on synthetic packets.
+
+Not a capture from a live client.
 
 Run: python -m pip install lupa; python tests/smoke.py
 Optional --ref checks another git revision without changing the working tree.
@@ -111,3 +113,129 @@ end
 assert(funcs.GetPartyType(999) == 'other')
 """)
 print("PASS: server-id, pet/fellow ownership, all 18 party/alliance slots")
+
+# The real packet handler fed whole chunks the way Ashita 4.3 delivers them:
+# one packet_in per packet, each carrying the chunk it came in.
+PACKET_STUBS = b"""
+T = function(t) return setmetatable(t, {__index={
+    append=table.insert,
+    contains=function(t, v) for _, x in ipairs(t) do if x == v then return true end end return false end,
+}}) end
+package.loaded.chat = {}
+chat = { color1 = function(_, s) return s end, color2 = function(_, s) return s end }
+messages = {}
+local chatManager = { AddChatMessage = function(_, _, _, text) messages[#messages + 1] = text end }
+buffNames = { [13] = 'Slow' }
+local resources = { GetString = function(_, table, id) assert(table == 'buffs.names'); return buffNames[id] end }
+AshitaCore = {
+    GetChatManager = function() return chatManager end,
+    GetResourceManager = function() return resources end,
+}
+struct = { unpack = function(fmt, data, offset)
+    local count = fmt:match('^c(%d+)$')
+    if count then return data:sub(offset, offset + tonumber(count) - 1) end
+    local value = 0
+    for i = ({H=2, I=4, L=4})[fmt] - 1, 0, -1 do value = value * 256 + data:byte(offset + i) end
+    return value
+end }
+ashita = {bits={unpack_be=function(data, offset, start, width)
+    assert(start == 9 and width == 7)
+    return math.floor(data:byte(offset + 2) / 2)
+end}}
+
+-- Header: 9-bit id, size in 4-byte words, then the chunk's 16-bit sync.
+function packet(id, size, sync, body)
+    assert(size % 4 == 0 and #body <= size - 4, 'packet body does not fit its size')
+    local header = string.char(id % 256, math.floor(id / 256) + size / 4 * 2, sync % 256, math.floor(sync / 256))
+    return header .. body .. string.rep('\\0', size - 4 - #body)
+end
+
+function deliver(packets)
+    local chunk = table.concat(packets)
+    local blocked = {}
+    for i, p in ipairs(packets) do
+        local e = {id=p:byte(1) + p:byte(2) % 2 * 256, size=#p, data=p, data_raw=p, data_modified=p,
+                   chunk_data=chunk, chunk_data_raw=chunk, chunk_size=#chunk, blocked=false}
+        handler.HandleIncomingPacket(e)
+        blocked[i] = e.blocked
+    end
+    return blocked
+end
+"""
+
+
+def packet_runtime():
+    runtime = LuaRuntime(encoding=None)
+    runtime.execute(PACKET_STUBS)
+    runtime.globals().handler = runtime.execute(source("lib/packethandlers.lua"))
+    runtime.execute(b"gPacketHandlers = handler")
+    return runtime
+
+
+# AXI-89: the server can put the same packet twice in one chunk. When the
+# repeat was the chunk's first packet, the addon took it for a new chunk and
+# dropped every action after it: no animation, no log line, damage dealt.
+lua = packet_runtime()
+lua.execute(b"""
+gProfileSettings = { mode = {} }
+actions = {}
+handler.HandleIncoming0x28 = function(e) actions[#actions + 1] = e.data; return e.data end
+
+local health = packet(0x0DF, 8, 7, 'hp')
+local strike = packet(0x028, 20, 7, 'ground strike')
+local follow = packet(0x028, 20, 7, 'next round')
+local first = deliver({health, strike, health, follow})
+assert(not first[2] and not first[4], 'an action after a repeat of the chunk\\'s first packet was dropped')
+assert(#actions == 2 and actions[2] == follow)
+
+local resent = deliver({health, strike, health, follow})
+assert(resent[2] and resent[4], 'a resent chunk must still be dropped as a duplicate')
+assert(#actions == 2)
+
+local nextChunk = deliver({packet(0x0DF, 8, 8, 'hp'), packet(0x028, 20, 8, 'ground strike')})
+assert(not nextChunk[2] and #actions == 3, 'the same action in the next chunk is new')
+""")
+print("PASS: a repeated packet inside a chunk keeps its later actions; resends still dropped")
+
+# AXI-126: a status the client has no name for (AscensionXI's Judgement, 828)
+# wearing off unloaded the addon with "table index is nil".
+lua = packet_runtime()
+lua.execute(source("lib/constants.lua"))
+lua.globals().res_actmsg = lua.execute(source("lib/res/action_messages.lua"))[0]  # also returns its field list
+lua.globals().gFuncs = lua.execute(source("lib/functions.lua"))
+lua.execute(b"""
+gProfileSettings = { mode = { condensetargets = true }, lang = { msg_text = 'en', internal = 2 } }
+gProfileColor = { statuscol = 1, enfeebcol = 2, itemcol = 3, spellcol = 4, abilcol = 5, me = 6, mob = 7 }
+gProfileFilter = { me = {} }
+pending = {}
+-- Ashita's common library gives functions bind1/once; constants.lua reuses the global name debug.
+require('debug').setmetatable(function() end, {__index = {
+    bind1 = function(f, a) return function(...) return f(a, ...) end end,
+    once = function(f) pending[#pending + 1] = f end,
+}})
+local actors = {
+    [1] = {id=1, name='Ulti', filter='me', type='me', owner_name=''},
+    [2] = {id=2, name='Goblin', filter='monsters', type='mob', owner_name=''},
+}
+gActionHandlers = {
+    ActorParse = function(id) return actors[id] end,
+    AssembleTargets = function(_, targets) return targets[1].name .. "'s" end,
+}
+
+local function u32(v) return string.char(v % 256, math.floor(v / 256) % 256, math.floor(v / 65536) % 256, 0) end
+local function wearsOff(status, sync)
+    -- actor, target, param, value, actor/target index, message 206
+    local body = u32(1) .. u32(2) .. u32(status) .. u32(0) .. string.char(0, 0, 0, 0, 206, 0)
+    return packet(0x029, 28, sync, body)
+end
+
+local blocked = deliver({wearsOff(828, 1)})
+assert(blocked[1] and #messages == 1, 'the nameless wear-off line should be printed by the addon')
+assert(messages[1] == "Goblin's  effect wears off.", messages[1])
+
+deliver({wearsOff(13, 2)})
+assert(#pending == 1, 'a named status still condenses')
+pending[1]()
+assert(#messages == 2 and messages[2] == "Goblin's Slow effect wears off.", messages[2])
+""")
+print("PASS: a status without a client name wears off without unloading; named ones condense")

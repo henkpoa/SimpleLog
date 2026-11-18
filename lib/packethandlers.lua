@@ -10,8 +10,27 @@ local packethandlers = {};
 -- trying to identify possible dupes
 local last_chunk_buffer;
 local reference_buffer = T{};
+-- AscensionXI (AXI-89): where the next packet of the chunk being read starts.
+-- A server can send the same packet twice in one chunk, so a packet whose
+-- bytes repeat the chunk's first packet does not start a new chunk when it
+-- sits where the current chunk's next packet belongs. Treating it as a new
+-- chunk filed this chunk as already seen and dropped its remaining actions.
+local chunk_offset = 0;
+local chunk_size = 0;
+local function continues_chunk(e)
+    local stop = chunk_offset + e.size
+    return chunk_offset > 0 and stop <= chunk_size and stop <= e.chunk_size
+        and e.chunk_data:sub(chunk_offset + 1, stop) == e.data:sub(1, e.size)
+end
+
 function record_packets(e)
+    if continues_chunk(e) then
+        chunk_offset = chunk_offset + e.size
+        return
+    end
     if ffi.C.memcmp(e.data_raw, e.chunk_data_raw, e.size) == 0 then
+        chunk_offset = e.size
+        chunk_size = e.chunk_size
         if #reference_buffer > 2 then
             reference_buffer[#reference_buffer] = nil
         end
@@ -43,6 +62,13 @@ function check_duplicates(e)
         end
     end
     return false
+end
+
+-- AscensionXI (AXI-126): a server-made status can have no name in the
+-- client's table. Its wear-off line is printed uncondensed, as the game does.
+local function HasStatusName(status_id)
+    local name = AshitaCore:GetResourceManager():GetString('buffs.names', status_id, gProfileSettings.lang.internal)
+    return name ~= nil and name ~= ''
 end
 
 packethandlers.HandleIncoming0x00A = function(e)
@@ -176,8 +202,8 @@ packethandlers.HandleIncomingPacket = function(e)
                 :gsub('${number}',number or ''), am.message_id)
                 AshitaCore:GetChatManager():AddChatMessage(color, false, msg)
             end
-        elseif am.message_id == 206 and gProfileSettings.mode.condensetargets then -- Wears off messages
-            -- Condenses across multiple packets
+        elseif am.message_id == 206 and gProfileSettings.mode.condensetargets and HasStatusName(am.param_1) then -- Wears off messages
+            -- Condenses across multiple packets, keyed on the status name
             local status
 
             if enfeebling:contains(am.param_1) and AshitaCore:GetResourceManager():GetString('buffs.names', am.param_1) then
