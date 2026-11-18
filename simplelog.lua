@@ -20,10 +20,10 @@
 --]]
 
 addon.name      = 'simplelog';
-addon.author    = 'Created by Byrth, Ported by Spiken';
-addon.version   = '0.1.3';
+addon.author    = 'Created by Byrth, Ported by Spiken, AscensionXI edition by Mindlor';
+addon.version   = '0.1.3-axi1';
 addon.desc      = 'Combat log Parser';
-addon.link      = 'https://github.com/Spike2D/SimpleLog';
+addon.link      = 'https://github.com/henkpoa/SimpleLog/tree/ascensionxi';
 
 require('common');
 if (ashita.addons_version >= 4.3) then
