@@ -6,6 +6,13 @@ AscensionXI. Runtime files are ThornyFFXI/SimpleLog commit
 below, each marked `AscensionXI` in `lib/packethandlers.lua`. Keep the original
 credits, LICENSE, and per-file notices.
 
+`simplelog.lua` names this build: version `0.1.3-axi1`, the original credits
+followed by "AscensionXI edition by Mindlor", and a link to this branch. Raise
+the `axiN` suffix with each AscensionXI release, and change the `author` and
+`version` of the `simplelog` entry in the server's `client/addons/catalog.json`
+to match (the launcher's ADDONS page shows those, and `resolve` never
+overwrites them).
+
 ## AscensionXI fixes
 
 - **AXI-126, a status with no client name.** Our server's own statuses
