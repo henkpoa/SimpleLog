@@ -21,7 +21,7 @@
 
 addon.name      = 'simplelog';
 addon.author    = 'Created by Byrth, Ported by Spiken, AscensionXI edition by Mindlor';
-addon.version   = '0.1.3-axi1';
+addon.version   = '0.1.3-axi2';
 addon.desc      = 'Combat log Parser';
 addon.link      = 'https://github.com/henkpoa/SimpleLog/tree/ascensionxi';
 

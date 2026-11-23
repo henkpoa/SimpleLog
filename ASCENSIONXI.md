@@ -3,10 +3,11 @@
 The `ascensionxi` branch of `henkpoa/SimpleLog` is the launcher source for
 AscensionXI. Runtime files are ThornyFFXI/SimpleLog commit
 `ce015e15178533815fb19274e9772ecfad771f61` (0.1.3) plus the AscensionXI fixes
-below, each marked `AscensionXI` in `lib/packethandlers.lua`. Keep the original
+below, each marked `AscensionXI` in `lib/packethandlers.lua` or
+`lib/actionhandlers.lua`. Keep the original
 credits, LICENSE, and per-file notices.
 
-`simplelog.lua` names this build: version `0.1.3-axi1`, the original credits
+`simplelog.lua` names this build: version `0.1.3-axi2`, the original credits
 followed by "AscensionXI edition by Mindlor", and a link to this branch. Raise
 the `axiN` suffix with each AscensionXI release, and change the `author` and
 `version` of the `simplelog` entry in the server's `client/addons/catalog.json`
@@ -31,6 +32,17 @@ overwrites them).
   belongs now always continues that chunk. Resent chunks are still dropped.
   The tests prove the flaw and the fix on synthetic chunks. Whether this was
   every AXI-89 report is not proven: nobody captured a failing chunk.
+- **Geist Wall in Onslaught T4, a removed status with no client name**
+  (0.1.3-axi2). A monster's dispel reports the removed status by its id, and
+  eleven of our own dispellable statuses have no client name: Paladin's
+  Divine Fury Lights (844-851, which go on the whole party), Monk's Resonance
+  (817), the Beastmaster defensive shell (863) and Thief's Bloodied Edge (866). The action line joined
+  the missing name into its text and the addon unloaded with
+  `actionhandlers.lua:372: attempt to concatenate local 'numb' (a nil value)`.
+  The name now prints blank, as the game prints it. An additional effect with
+  such a status printed `ERROR 178` and now prints blank too. On a round of
+  two or more hits, a spike status (Curse Spikes gear) was stored under a
+  misspelled key and printed `ERROR 150`. It now prints the status.
 
 The previous launcher pin was Spike2D/SimpleLog
 `decc2f66a5072e9650dee7d95ece07a45664e41b` (0.1.2). Thorny's eleven subsequent
@@ -51,11 +63,16 @@ python tests/smoke.py --ref decc2f66a5072e9650dee7d95ece07a45664e41b
 The current code passes LuaJIT compilation of all 17 Lua files, synthetic
 own/targeted/unselected crafting-result messages, server-id and pet/fellow
 ownership lookup, all 18 party/alliance slots, a chunk holding a repeat of
-its first packet (and the resend of that chunk), and a wear-off for a status
-without a client name. The old pin deliberately fails the crafting case with
+its first packet (and the resend of that chunk), a wear-off for a status
+without a client name, and Geist Wall removing one (plain and simplified log,
+one target and two, an additional effect, and a two-hit Curse Spikes round).
+The old pin deliberately fails the crafting case with
 `attempt to index global 'Self' (a nil value)`. `--ref 3215adf` (before the
 AscensionXI fixes) fails the chunk case. Removing the `HasStatusName` guard
 fails the wear-off case with the reported `table index is nil`.
+`--ref 6abf3be` (before the Geist Wall fix) fails with the reported
+`attempt to concatenate local 'numb' (a nil value)`. Removing each of the
+fix's three changes alone fails its own case.
 These are real Lua modules with stubbed Ashita interfaces, not live-client
 tests or captured retail packets. They do not test all combat messages,
 rendering, native memory, or transport.
