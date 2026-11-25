@@ -37,7 +37,8 @@ actionhandlers.parse_action_packet = function(act)
                 end
                 if m.spike_effect_param ~= nil and type(m.spike_effect_param) == "number" then
                     if AshitaCore:GetResourceManager():GetString('buffs.names', m.spike_effect_param) ~= nil then
-                        m.spike_effects_status = AshitaCore:GetResourceManager():GetString('buffs.names', m.spike_effect_param, gProfileSettings.lang.internal)
+                        -- AscensionXI: was stored as spike_effects_status, a name nothing reads.
+                        m.spike_effect_status = AshitaCore:GetResourceManager():GetString('buffs.names', m.spike_effect_param, gProfileSettings.lang.internal)
                     end
                 end
                 m.number = 1
@@ -322,6 +323,11 @@ actionhandlers.parse_action_packet = function(act)
                 if not gProfileColor[act.actor.owner or act.actor.type] then
                     gFuncs.Error('SimpleLog error, missing filter:'..tostring(act.actor.owner)..' '..tostring(act.actor.type))
                 end
+                -- AscensionXI: a status the client has no name for (one of the
+                -- server's own, such as a Paladin's Light that Geist Wall removes)
+                -- prints blank, as the game prints it. Its missing name used to
+                -- unload the addon at the ${numb} line below.
+                if m.fields.status and m.status == nil then m.status = '' end
                 if m.fields.status then numb = m.status else numb = gActionHandlers.PrefSuf((m.message == 674 and m.add_effect_param or m.cparam or m.param), m.message,act.actor.damage, col) end
 
                 if msg and m.message == 70 and not gProfileSettings.mode.simplify and gProfileSettings.lang.msg_text ~= 'jp' then -- fix pronoun on parry
@@ -419,6 +425,8 @@ actionhandlers.parse_action_packet = function(act)
                         msg = gFuncs.PluralTarget(msg, m.add_effect_message)
                     end
                 end
+                -- AscensionXI: a status without a client name prints blank, not "ERROR 178".
+                if m.add_effect_fields.status and m.add_effect_status == nil then m.add_effect_status = '' end
                 if m.add_effect_fields.status then numb = m.add_effect_status else numb = gActionHandlers.PrefSuf((m.cadd_effect_param or m.add_effect_param), m.add_effect_message, act.actor.damage, col) end
                 if not act.action then
                     --AshitaCore:GetChatManager():AddChatMessage(color, false, 'act.action==nil : '..m.message..' - '..m.add_effect_message..' - '..msg)

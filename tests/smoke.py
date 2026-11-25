@@ -239,3 +239,86 @@ pending[1]()
 assert(#messages == 2 and messages[2] == "Goblin's Slow effect wears off.", messages[2])
 """)
 print("PASS: a status without a client name wears off without unloading; named ones condense")
+
+# Geist Wall in Onslaught T4 can remove a Paladin's Light (844), which has no client
+# name, and the addon unloaded with "actionhandlers.lua:372: attempt to
+# concatenate local 'numb' (a nil value)". The real action parser, plain and
+# simplified, one target and two, and the same gap on an additional effect.
+def action_runtime(simplify):
+    runtime = LuaRuntime(encoding=None)
+    runtime.execute(PACKET_STUBS)
+    runtime.execute(source("lib/constants.lua"))
+    runtime.globals().res_actmsg = runtime.execute(source("lib/res/action_messages.lua"))[0]
+    runtime.globals().gFuncs = runtime.execute(source("lib/functions.lua"))
+    runtime.globals().gActionHandlers = runtime.execute(source("lib/actionhandlers.lua"))
+    runtime.globals().simplify = simplify
+    runtime.execute(b"""
+buffNames[844] = nil
+gStatus = { PlayerId = 1 }
+gProfileSettings = {
+    mode = { simplify = simplify, condensetargets = true },
+    lang = { msg_text = 'en', internal = 2 },
+    text = { line_aoebuff = '${actor} ${abil} > ${target} (${status})' },
+}
+gProfileColor = setmetatable({}, {__index = function() return 1 end})
+local actors = {
+    [1] = {id=1, server_id=1, name='Ulti', filter='me', type='me', owner_name='', race=1},
+    [2] = {id=2, server_id=2, name='Yoji', filter='party', type='p1', owner_name='', race=1},
+    [3] = {id=3, server_id=3, name='Gurfurlur', filter='monsters', type='mob', owner_name='', race=0},
+}
+gActionHandlers.ActorParse = function(id) local a = actors[id]; return a and setmetatable({}, {__index = a}) end
+gActionHandlers.SpellParse = function() return {name='Geist Wall', weapon_skill='Geist Wall'} end
+gFuncs.CheckFilter = function() return true end
+
+function result(message, param, extra)
+    local r = {message=message, param=param, reaction=0, effect=0, unknown=0,
+               has_add_effect=false, add_effect_message=0, add_effect_param=0,
+               has_spike_effect=false, spike_effect_message=0, spike_effect_param=0}
+    for k, v in pairs(extra or {}) do r[k] = v end
+    return r
+end
+
+function mobMove(targets)
+    local act = {actor_id=3, category=11, param=1155, targets={}}
+    for _, t in ipairs(targets) do
+        act.targets[#act.targets + 1] = {server_id=t[1], actions={t[2]}}
+    end
+    messages = {}
+    gActionHandlers.parse_action_packet(act)
+    return messages
+end
+""")
+    return runtime
+
+
+for simplify in (False, True):
+    lua = action_runtime(simplify)
+    lua.execute(b"""
+local lines = mobMove({{1, result(159, 844)}})
+assert(#lines == 1, 'Geist Wall removing a nameless status printed ' .. #lines .. ' lines')
+assert(not lines[1]:find('ERROR', 1, true), lines[1])
+
+lines = mobMove({{1, result(159, 844)}, {2, result(159, 13)}})
+assert(#lines == 2, 'two targets, one nameless status, printed ' .. #lines .. ' lines')
+assert(lines[2]:find('Slow', 1, true), 'a named status keeps its name: ' .. lines[2])
+
+lines = mobMove({{1, result(185, 120, {has_add_effect=true, add_effect_message=160, add_effect_param=844})}})
+assert(#lines == 2, 'damage and additional effect printed ' .. #lines .. ' lines')
+for _, line in ipairs(lines) do assert(not line:find('ERROR', 1, true), line) end
+
+-- Curse Spikes gear on a two-hit round: the round's spike status was stored
+-- under a key nothing read, and printed as an ERROR.
+buffNames[9] = 'curse'
+local spikes = {has_spike_effect=true, spike_effect_message=374, spike_effect_param=9}
+local act = {actor_id=3, category=1, param=0, targets={{server_id=1,
+             actions={result(1, 30, spikes), result(1, 25, spikes)}}}}
+messages = {}
+gActionHandlers.parse_action_packet(act)
+local cursed = 0
+for _, line in ipairs(messages) do
+    assert(not line:find('ERROR', 1, true), line)
+    if line:find('curse', 1, true) then cursed = cursed + 1 end
+end
+assert(cursed == 2, 'each hit\\'s spike line names the curse, got ' .. cursed)
+""")
+    print(f"PASS: Geist Wall removing a status without a client name ({'simplified' if simplify else 'plain'} log)")
